@@ -3638,18 +3638,24 @@ namespace RobTeach.Views
                     return arcCenterMatch && arcRadiusMatch && arcStartAngleMatch && arcEndAngleMatch;
 
                 case DxfLwPolyline poly1 when entity2 is DxfLwPolyline poly2:
-                    Debug.WriteLine($"[DEBUG] LWPolylineCompare: VCount1={poly1.Vertices.Count}, VCount2={poly2.Vertices.Count}, Closed1={poly1.IsClosed}, Closed2={poly2.IsClosed}");
+                    AppLogger.Log($"[DEBUG] LWPolylineCompare: VCount1={poly1.Vertices.Count}, VCount2={poly2.Vertices.Count}, Closed1={poly1.IsClosed}, Closed2={poly2.IsClosed}", LogLevel.Debug);
                     if (poly1.Vertices.Count != poly2.Vertices.Count || poly1.IsClosed != poly2.IsClosed) return false;
 
-                    var vertices1 = poly1.Vertices.OrderBy(v => v.X).ThenBy(v => v.Y).ToList();
-                    var vertices2 = poly2.Vertices.OrderBy(v => v.X).ThenBy(v => v.Y).ToList();
+                    var vertices1 = poly1.Vertices.Select(v => new Point(v.X, v.Y)).ToList();
+                    var vertices2 = poly2.Vertices.Select(v => new Point(v.X, v.Y)).ToList();
+
+                    int startIndex1 = FindBottomLeftVertexIndex(vertices1);
+                    int startIndex2 = FindBottomLeftVertexIndex(vertices2);
+
+                    AppLogger.Log($"[DEBUG] LWPolylineCompare: StartIndex1={startIndex1}, StartIndex2={startIndex2}", LogLevel.Debug);
+
+                    if (startIndex1 == -1 || startIndex2 == -1) return false;
 
                     for (int i = 0; i < vertices1.Count; i++)
                     {
-                        var v1 = vertices1[i];
-                        var v2 = vertices2[i];
-                        // LwPolyline vertices are DxfLwPolylineVertex, which have X, Y, Bulge. Z is from polyline's Elevation.
-                        // Using PointEquals for X,Y comparison by creating temporary DxfPoints.
+                        var v1 = poly1.Vertices[(startIndex1 + i) % vertices1.Count];
+                        var v2 = poly2.Vertices[(startIndex2 + i) % vertices2.Count];
+
                         bool xyMatch = PointEquals(new DxfPoint(v1.X, v1.Y, 0), new DxfPoint(v2.X, v2.Y, 0), tolerance);
                         bool bulgeMatch = Math.Abs(v1.Bulge - v2.Bulge) < tolerance;
                         AppLogger.Log($"[DEBUG] LWPolylineCompare: V{i} P1=({v1.X},{v1.Y},B={v1.Bulge}) | P2=({v2.X},{v2.Y},B={v2.Bulge}) | XYMatch={xyMatch}, BulgeMatch={bulgeMatch}", LogLevel.Debug);
@@ -4058,17 +4064,14 @@ namespace RobTeach.Views
             if (vertices == null || vertices.Count == 0) return -1;
 
             int bottomLeftIndex = 0;
-            double minDistance = double.MaxValue;
+            Point bottomLeftVertex = vertices[0];
 
-            for (int i = 0; i < vertices.Count; i++)
+            for (int i = 1; i < vertices.Count; i++)
             {
                 var p = vertices[i];
-                // Simple distance to origin (0,0) - assuming Y is not flipped in this context
-                // A better approach would be to transform to screen coordinates if Y is flipped
-                double distance = Math.Sqrt(p.X * p.X + p.Y * p.Y);
-                if (distance < minDistance)
+                if (p.Y < bottomLeftVertex.Y || (p.Y == bottomLeftVertex.Y && p.X < bottomLeftVertex.X))
                 {
-                    minDistance = distance;
+                    bottomLeftVertex = p;
                     bottomLeftIndex = i;
                 }
             }
