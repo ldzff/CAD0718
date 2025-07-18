@@ -37,6 +37,7 @@ namespace RobTeach.Models
         /// </summary>
         [JsonIgnore]
         public List<Point3D> Points { get; set; } = new List<Point3D>();
+        public List<Point3D> SerializableVertices { get; set; } = new List<Point3D>();
         public double PolygonZ { get; set; } = 0.0;
 
         /// <summary>

@@ -3693,53 +3693,51 @@ namespace RobTeach.Views
                     continue;
                 }
 
-                foreach (var trajectory in pass.Trajectories)
-                {
-                    if (trajectory.PrimitiveType == "Polygon")
-                    {
-                        PopulateTrajectoryPoints(trajectory);
-                        AppLogger.Log($"[DEBUG] Pre-Reconciliation: Populated points for Polygon Trajectory. Point Count: {trajectory.Points.Count}", LogLevel.Debug);
-                    }
-                }
-
                 for (int i = 0; i < pass.Trajectories.Count; i++)
                 {
                     var trajectory = pass.Trajectories[i];
                     AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Processing trajectory {i} in pass '{pass.PassName}'. PrimitiveType: {trajectory.PrimitiveType}", LogLevel.Debug);
-                    if (trajectory.OriginalDxfEntity == null)
-                    {
-                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Trajectory {i} has null OriginalDxfEntity. Skipping.", LogLevel.Debug);
-                        continue;
-                    }
 
-                    DxfEntity? matchedEntity = null;
-                    int matchedEntityIndexInAvailableList = -1;
-
-                    for (int j = 0; j < availableDocEntities.Count; j++)
+                    if (trajectory.PrimitiveType == "Polygon" && trajectory.SerializableVertices.Any())
                     {
-                        if (trajectory.OriginalDxfEntity is DxfLwPolyline poly1 && availableDocEntities[j] is DxfLwPolyline poly2)
+                        DxfLwPolyline? matchedEntity = availableDocEntities.OfType<DxfLwPolyline>().FirstOrDefault(poly => {
+                            if (poly.Vertices.Count != trajectory.SerializableVertices.Count) return false;
+                            var polyVertices = poly.Vertices.Select(v => new Point3D(v.X, v.Y, poly.Elevation)).ToList();
+                            var trajVertices = trajectory.SerializableVertices;
+
+                            var polyPoints = polyVertices.Select(p => new Point(p.X, p.Y)).ToList();
+                            var trajPoints = trajVertices.Select(p => new Point(p.X, p.Y)).ToList();
+
+                            int startIndex1 = FindBottomLeftVertexIndex(polyPoints);
+                            int startIndex2 = FindBottomLeftVertexIndex(trajPoints);
+
+                            if (startIndex1 == -1 || startIndex2 == -1) return false;
+
+                            for(int j = 0; j < polyPoints.Count; j++)
+                            {
+                                var p1 = polyVertices[(startIndex1 + j) % polyPoints.Count];
+                                var p2 = trajVertices[(startIndex2 + j) % trajPoints.Count];
+                                if (Math.Abs(p1.X - p2.X) > 0.001 || Math.Abs(p1.Y - p2.Y) > 0.001)
+                                {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        });
+
+                        if (matchedEntity != null)
                         {
-                            AppLogger.Log($"[DEBUG] Comparing Polygons: Trajectory {i} with Entity {j}", LogLevel.Debug);
-                            AppLogger.Log($"[DEBUG] Poly1 Vertices: {string.Join(", ", poly1.Vertices.Select(v => $"({v.X},{v.Y})"))}", LogLevel.Debug);
-                            AppLogger.Log($"[DEBUG] Poly2 Vertices: {string.Join(", ", poly2.Vertices.Select(v => $"({v.X},{v.Y})"))}", LogLevel.Debug);
+                            trajectory.OriginalDxfEntity = matchedEntity;
+                            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Reconciled polygon trajectory.", LogLevel.Debug);
                         }
-
-                        if (AreEntitiesGeometricallyEquivalent(trajectory.OriginalDxfEntity, availableDocEntities[j]))
+                        else
                         {
-                            matchedEntity = availableDocEntities[j];
-                            matchedEntityIndexInAvailableList = j;
-                            break;
+                            AppLogger.Log($"[WARNING] ReconcileTrajectoryEntities: Could not find a matching live entity for deserialized polygon.", LogLevel.Warning);
                         }
-                    }
-
-                    if (matchedEntity != null)
-                    {
-                        trajectory.OriginalDxfEntity = matchedEntity;
-                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Reconciled trajectory entity: {matchedEntity.GetType().Name}", LogLevel.Debug);
                     }
                     else
                     {
-                        AppLogger.Log($"[WARNING] ReconcileTrajectoryEntities: Could not find a matching live entity for deserialized {trajectory.PrimitiveType}.", LogLevel.Warning);
+                         // Handle other entity types if necessary
                     }
                 }
             }
@@ -4052,6 +4050,7 @@ namespace RobTeach.Views
                 orderedVertices.Add(vertices[(startIndex + i) % vertices.Count]);
             }
             newTrajectory.Points = orderedVertices;
+            newTrajectory.SerializableVertices = orderedVertices;
 
             // No need to call PopulateTrajectoryPoints for polygons as it's handled differently
             newTrajectory.Runtime = TrajectoryUtils.CalculateMinRuntime(newTrajectory);
