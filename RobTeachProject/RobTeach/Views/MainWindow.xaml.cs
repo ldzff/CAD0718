@@ -3655,6 +3655,7 @@ namespace RobTeach.Views
                         AppLogger.Log($"[DEBUG] LWPolylineCompare: V{i} P1=({v1.X},{v1.Y},B={v1.Bulge}) | P2=({v2.X},{v2.Y},B={v2.Bulge}) | XYMatch={xyMatch}, BulgeMatch={bulgeMatch}", LogLevel.Debug);
                         if (!xyMatch || !bulgeMatch)
                         {
+                            AppLogger.Log($"[DEBUG] LWPolylineCompare: Mismatch found at index {i}", LogLevel.Debug);
                             return false;
                         }
                     }
@@ -3668,106 +3669,71 @@ namespace RobTeach.Views
 
         private void ReconcileTrajectoryEntities(Models.Configuration config, DxfFile? currentDoc)
         {
+            AppLogger.Log("[DEBUG] ReconcileTrajectoryEntities: Starting.", LogLevel.Debug);
             if (config == null || currentDoc == null || config.SprayPasses == null || !currentDoc.Entities.Any())
             {
-                Debug.WriteLine("[DEBUG] ReconcileTrajectoryEntities: Skipping reconciliation due to null config, doc, passes, or empty document entities.");
+                AppLogger.Log("[DEBUG] ReconcileTrajectoryEntities: Skipping reconciliation due to null config, doc, passes, or empty document entities.", LogLevel.Debug);
                 return;
             }
 
-            Debug.WriteLine($"[DEBUG] ReconcileTrajectoryEntities: Starting. Document has {currentDoc.Entities.Count()} entities.");
-            // Debug.WriteLine("[JULES_DEBUG] ReconcileTrajectoryEntities: Entering method.");
-
-            // Create a list of available entities from the document to "consume" as they are matched
-            // This helps handle cases where multiple identical geometric entities might exist in the DXF,
-            // ensuring each trajectory maps to a unique live entity if possible.
+            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Document has {currentDoc.Entities.Count()} entities.", LogLevel.Debug);
             List<DxfEntity> availableDocEntities = new List<DxfEntity>(currentDoc.Entities);
 
             foreach (var pass in config.SprayPasses)
             {
+                AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Processing pass '{pass.PassName}'.", LogLevel.Debug);
                 if (pass.Trajectories == null)
                 {
-                    // Debug.WriteLine($"[JULES_DEBUG] ReconcileTrajectoryEntities: Pass '{pass.PassName}' has null trajectories. Skipping.");
+                    AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Pass '{pass.PassName}' has null trajectories. Skipping.", LogLevel.Debug);
                     continue;
                 }
-                // Debug.WriteLine($"[JULES_DEBUG] ReconcileTrajectoryEntities: Processing pass '{pass.PassName}'. Initial trajectory order:");
-                // for(int k=0; k < pass.Trajectories.Count; k++)
-                // {
-                //     Debug.WriteLine($"[JULES_DEBUG]   Pre-Reconcile: Pass[{pass.PassName}]-Trajectory[{k}]: {pass.Trajectories[k].ToString()}");
-                // }
 
                 for (int i = 0; i < pass.Trajectories.Count; i++)
                 {
                     var trajectory = pass.Trajectories[i];
+                    AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Processing trajectory {i} in pass '{pass.PassName}'. PrimitiveType: {trajectory.PrimitiveType}", LogLevel.Debug);
                     if (trajectory.OriginalDxfEntity == null && trajectory.PrimitiveType != "Polygon")
                     {
-                        Debug.WriteLine($"[DEBUG] ReconcileTrajectoryEntities: Trajectory {i} in pass '{pass.PassName}' has null OriginalDxfEntity and is not a Polygon.");
+                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Trajectory {i} has null OriginalDxfEntity and is not a Polygon. Skipping.", LogLevel.Debug);
                         continue;
                     }
 
-                    DxfEntity? matchedEntity = null;
-                    int matchedEntityIndexInAvailableList = -1;
-
-                    for (int j = 0; j < availableDocEntities.Count; j++)
+                    if (trajectory.PrimitiveType == "Polygon")
                     {
-                        if (trajectory.PrimitiveType == "Polygon")
-                        {
-                            if (availableDocEntities[j] is DxfLwPolyline polyline)
-                            {
-                                // A simple comparison for polygons could be to check if they have the same number of vertices
-                                // and if the first vertex is the same. This is not a robust check, but it's a start.
-                                if (polyline.Vertices.Count == trajectory.Points.Count)
-                                {
-                                    bool allVerticesMatch = true;
-                                    for (int k = 0; k < polyline.Vertices.Count; k++)
-                                    {
-                                        var v1 = polyline.Vertices[k];
-                                        var v2 = trajectory.Points[k];
-                                        if (!PointEquals(new DxfPoint(v1.X, v1.Y, polyline.Elevation), new DxfPoint(v2.X, v2.Y, trajectory.PolygonZ)))
-                                        {
-                                            allVerticesMatch = false;
-                                            break;
-                                        }
-                                    }
-
-                                    if (allVerticesMatch)
-                                    {
-                                        matchedEntity = availableDocEntities[j];
-                                        matchedEntityIndexInAvailableList = j;
-                                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Matched polygon trajectory with {polyline.Vertices.Count} vertices.", LogLevel.Debug);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        else if (AreEntitiesGeometricallyEquivalent(trajectory.OriginalDxfEntity, availableDocEntities[j]))
-                        {
-                            matchedEntity = availableDocEntities[j];
-                            matchedEntityIndexInAvailableList = j;
-                            break;
-                        }
-                    }
-
-                    if (matchedEntity != null)
-                    {
-                        trajectory.OriginalDxfEntity = matchedEntity; // Update reference to the live entity from the document
-                        // availableDocEntities.RemoveAt(matchedEntityIndexInAvailableList); // Allow re-matching for shared entities across passes
-                        Debug.WriteLine($"[DEBUG] ReconcileTrajectoryEntities: Reconciled trajectory entity: {matchedEntity.GetType().Name} (Index in availableDocEntities was {matchedEntityIndexInAvailableList}, not removing).");
+                        var vertices = trajectory.Points.Select(p => new DxfLwPolylineVertex { X = p.X, Y = p.Y }).ToList();
+                        var polyline = new DxfLwPolyline(vertices) { IsClosed = true, Elevation = trajectory.PolygonZ };
+                        trajectory.OriginalDxfEntity = polyline;
+                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Re-created polygon trajectory with {vertices.Count} vertices.", LogLevel.Debug);
                     }
                     else
                     {
-                        // If no match, the trajectory.OriginalDxfEntity remains the deserialized instance.
-                        // Highlighting will likely fail for this specific entity.
-                        Debug.WriteLine($"[WARNING] ReconcileTrajectoryEntities: Could not find a matching live entity for deserialized {trajectory.PrimitiveType}.");
+                        DxfEntity? matchedEntity = null;
+                        int matchedEntityIndexInAvailableList = -1;
+
+                        for (int j = 0; j < availableDocEntities.Count; j++)
+                        {
+                            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Comparing trajectory {i} with entity {j} of type {availableDocEntities[j].GetType().Name}", LogLevel.Debug);
+                            if (AreEntitiesGeometricallyEquivalent(trajectory.OriginalDxfEntity, availableDocEntities[j]))
+                            {
+                                matchedEntity = availableDocEntities[j];
+                                matchedEntityIndexInAvailableList = j;
+                                break;
+                            }
+                        }
+
+                        if (matchedEntity != null)
+                        {
+                            trajectory.OriginalDxfEntity = matchedEntity;
+                            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Reconciled trajectory entity: {matchedEntity.GetType().Name}", LogLevel.Debug);
+                        }
+                        else
+                        {
+                            AppLogger.Log($"[WARNING] ReconcileTrajectoryEntities: Could not find a matching live entity for deserialized {trajectory.PrimitiveType}.", LogLevel.Warning);
+                        }
                     }
                 }
-                // Debug.WriteLine($"[JULES_DEBUG] ReconcileTrajectoryEntities: Finished processing pass '{pass.PassName}'. Final trajectory order for this pass:");
-                // for(int k=0; k < pass.Trajectories.Count; k++)
-                // {
-                //     Debug.WriteLine($"[JULES_DEBUG]   Post-Reconcile: Pass[{pass.PassName}]-Trajectory[{k}]: {pass.Trajectories[k].ToString()}");
-                // }
             }
-            Debug.WriteLine("[DEBUG] ReconcileTrajectoryEntities: Finished.");
-            // Debug.WriteLine("[JULES_DEBUG] ReconcileTrajectoryEntities: Exiting method.");
+            AppLogger.Log("[DEBUG] ReconcileTrajectoryEntities: Finished.", LogLevel.Debug);
         }
 
 
