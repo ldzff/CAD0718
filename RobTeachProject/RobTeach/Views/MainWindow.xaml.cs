@@ -63,8 +63,8 @@ namespace RobTeach.Views
         // Collections for managing DXF entities and their WPF shape representations
         private readonly List<DxfEntity> _selectedDxfEntities = new List<DxfEntity>(); // Stores original DXF entities selected by the user.
         // Qualified System.Windows.Shapes.Shape for dictionary key
-        private readonly Dictionary<System.Windows.Shapes.Shape, DxfEntity> _wpfShapeToDxfEntityMap = new Dictionary<System.Windows.Shapes.Shape, DxfEntity>(); // Changed to DxfEntity
-        private readonly Dictionary<string, DxfEntity> _dxfEntityHandleMap = new Dictionary<string, DxfEntity>(); // Maps DXF entity handles to entities for quick lookup when loading configs.
+        private readonly Dictionary<System.Windows.Shapes.Shape, SelectableDxfEntity> _wpfShapeToDxfEntityMap = new Dictionary<System.Windows.Shapes.Shape, SelectableDxfEntity>();
+        private readonly Dictionary<string, SelectableDxfEntity> _dxfEntityGuidMap = new Dictionary<string, SelectableDxfEntity>();
         private readonly List<System.Windows.Shapes.Polyline> _trajectoryPreviewPolylines = new List<System.Windows.Shapes.Polyline>(); // Keeps track of trajectory preview polylines for easy removal.
         private List<DirectionIndicator> _directionIndicators; // Field for the direction indicator arrow
         private List<System.Windows.Controls.TextBlock> _orderNumberLabels = new List<System.Windows.Controls.TextBlock>();
@@ -335,7 +335,7 @@ namespace RobTeach.Views
                 {
                     foreach (var trajectory in currentPass.Trajectories)
                     {
-                        if (trajectory.OriginalDxfEntity != null) // Assuming Trajectory stores the original DxfEntity
+                    if (trajectory.OriginalDxfEntity != null)
                         {
                             entitiesInCurrentPass.Add(trajectory.OriginalDxfEntity);
                         }
@@ -1703,9 +1703,12 @@ namespace RobTeach.Views
                 if (shape != null)
                 {
                     // Generate a unique identifier for the entity
+                    var selectableEntity = new SelectableDxfEntity(entity);
+                    shape.Tag = selectableEntity.Id.ToString();
                     shape.MouseLeftButtonDown += OnCadEntityClicked;
                     CadCanvas.Children.Add(shape);
-                    _wpfShapeToDxfEntityMap[shape] = entity;
+                    _wpfShapeToDxfEntityMap[shape] = selectableEntity;
+                    _dxfEntityGuidMap[selectableEntity.Id.ToString()] = selectableEntity;
                 }
             }
 
@@ -1913,68 +1916,35 @@ namespace RobTeach.Views
             Trajectory trajectoryToSelect = null; // Declare at wider scope
 
             // Detailed check for the main condition
-            if (sender is System.Windows.Shapes.Shape clickedShape && _wpfShapeToDxfEntityMap.TryGetValue(clickedShape, out DxfEntity? dxfEntity))
+            if (sender is System.Windows.Shapes.Shape clickedShape && _wpfShapeToDxfEntityMap.TryGetValue(clickedShape, out var selectableEntity))
             {
-                // keyExists is implicitly true if TryGetValue succeeds.
-                // dxfEntity will be non-null if TryGetValue returns true.
-                Trace.WriteLine($"  -- Checking sender type: {sender?.GetType().Name ?? "null"}, IsShape: true, Map contains key: true");
-                Trace.Flush();
-                Trace.WriteLine("  -- Condition (sender is Shape AND _wpfShapeToDxfEntityMap contains key) MET");
-                Trace.Flush();
+                var dxfEntity = selectableEntity.Entity;
+                var entityId = selectableEntity.Id.ToString();
 
-                // var dxfEntity = _wpfShapeToDxfEntityMap[clickedShape]; // No longer needed due to TryGetValue
-                Trace.WriteLine($"  -- Retrieved dxfEntity: {dxfEntity?.GetType().Name ?? "null"}");
-                Debug.WriteLine($"[DEBUG] OnCadEntityClicked: Retrieved DxfEntity: {dxfEntity?.GetType().Name}");
-                Trace.Flush();
-
-                Point clickPosCanvas = e.GetPosition(CadCanvas);
-                Debug.WriteLine($"[DEBUG] OnCadEntityClicked: Click position on Canvas = {clickPosCanvas}");
-                Point clickPosDxf = _transformGroup.Inverse.Transform(clickPosCanvas);
-                Debug.WriteLine($"[DEBUG] OnCadEntityClicked: Click position transformed to DXF Coords = {clickPosDxf}");
-
-                Rect entityDxfBounds = GetDxfEntityRect(dxfEntity); // Helper method to be added
-                Debug.WriteLine($"[DEBUG] OnCadEntityClicked: DXF Entity Bounds = {entityDxfBounds}");
-                if (entityDxfBounds != Rect.Empty)
-                {
-                    Debug.WriteLine($"[DEBUG] OnCadEntityClicked: Does transformed click fall within entity bounds? {entityDxfBounds.Contains(clickPosDxf)}");
-                }
-                
                 // Logic for adding/removing from current spray pass's trajectories
-                Trace.WriteLine($"  -- Checking current pass index: {_currentConfiguration.CurrentPassIndex}, SprayPasses count: {_currentConfiguration.SprayPasses?.Count ?? 0}");
-                Trace.Flush();
                 if (_currentConfiguration.CurrentPassIndex < 0 || _currentConfiguration.CurrentPassIndex >= _currentConfiguration.SprayPasses.Count)
                 {
-                    Trace.WriteLine("  -- Current pass index invalid, returning.");
-                    Trace.Flush();
                     string msg = "Please select or create a spray pass first.";
-                    AppLogger.Log(msg, LogLevel.Info); // Info, as it's guidance
+                    AppLogger.Log(msg, LogLevel.Info);
                     MessageBox.Show(msg, "No Active Pass", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
                 var currentPass = _currentConfiguration.SprayPasses[_currentConfiguration.CurrentPassIndex];
 
-                var existingTrajectory = currentPass.Trajectories.FirstOrDefault(t => t.OriginalEntityHandle == dxfEntity.Handle.ToString());
+                var existingTrajectory = currentPass.Trajectories.FirstOrDefault(t => t.OriginalEntityHandle == entityId);
 
                 if (existingTrajectory != null)
                 {
-                    // Entity is already part of the current pass. Mark it for selection.
-                    Trace.WriteLine("  -- Existing trajectory found. Selecting it.");
-                    Trace.Flush();
                     trajectoryToSelect = existingTrajectory;
-                    // Do NOT remove it from currentPass.Trajectories.
-                    // Do NOT set isConfigurationDirty = true just for re-selecting.
                 }
                 else
                 {
-                    // Select - Add to current pass
-                    Trace.WriteLine("  -- No existing trajectory. Creating and adding new one.");
-                    Trace.Flush();
                     var newTrajectory = new Trajectory
                     {
                         OriginalDxfEntity = dxfEntity,
-                        OriginalEntityHandle = dxfEntity.Handle.ToString(),
-                        EntityType = dxfEntity.GetType().Name, // General type, can be overridden by PrimitiveType
-                        IsReversed = false // Default, can be changed by specific logic below or UI
+                        OriginalEntityHandle = entityId,
+                        EntityType = dxfEntity.GetType().Name,
+                        IsReversed = false
                     };
 
                     switch (dxfEntity)
@@ -3118,12 +3088,11 @@ namespace RobTeach.Views
                     {
                         if (geometryResult.VisualHit is System.Windows.Shapes.Shape hitShape)
                         {
-                            if (_wpfShapeToDxfEntityMap.TryGetValue(hitShape, out DxfEntity? hitEntity) && hitEntity != null)
+                            if (_wpfShapeToDxfEntityMap.TryGetValue(hitShape, out var selectableEntity))
                             {
-                                if (!marqueeHitEntities.Contains(hitEntity))
+                                if (!marqueeHitEntities.Contains(selectableEntity.Entity))
                                 {
-                                    marqueeHitEntities.Add(hitEntity);
-                                    Debug.WriteLine($"[DEBUG] CadCanvas_MouseUp (Marquee HitTest): Hit DxfEntity {hitEntity.GetType().Name}");
+                                    marqueeHitEntities.Add(selectableEntity.Entity);
                                 }
                             }
                         }
@@ -3154,7 +3123,6 @@ namespace RobTeach.Views
                         Trajectory trajectory = currentPass.Trajectories[i];
                         if (marqueeHitEntities.Contains(trajectory.OriginalDxfEntity))
                         {
-                            Debug.WriteLine($"[DEBUG] CadCanvas_MouseUp (Shift+Marquee): Deselecting {trajectory.OriginalDxfEntity.GetType().Name}");
                             currentPass.Trajectories.RemoveAt(i);
                             itemsDeselectedCount++;
                         }
@@ -3177,18 +3145,20 @@ namespace RobTeach.Views
                         if (hitDxfEntity == null) continue; // Skip null entities
 
                         // Use geometric comparison to check if already selected, due to potential instance differences
-                        bool alreadySelected = currentPass.Trajectories.Any(t => t.OriginalEntityHandle == hitDxfEntity.Handle.ToString());
+                        var selectableEntity = _wpfShapeToDxfEntityMap[hitShape];
+                        var entityId = selectableEntity.Id.ToString();
+                        bool alreadySelected = currentPass.Trajectories.Any(t => t.OriginalEntityHandle == entityId);
                         if (!alreadySelected)
                         {
                             var newTrajectory = new Trajectory
                             {
-                                OriginalDxfEntity = hitDxfEntity,
-                                OriginalEntityHandle = hitDxfEntity.Handle.ToString(),
-                                EntityType = hitDxfEntity.GetType().Name, // Safe due to null check above
-                                IsReversed = false // Default
+                                OriginalDxfEntity = selectableEntity.Entity,
+                                OriginalEntityHandle = entityId,
+                                EntityType = selectableEntity.Entity.GetType().Name,
+                                IsReversed = false
                             };
                             // Populate geometric properties for the new trajectory
-                            if (hitDxfEntity is DxfLwPolyline polyline)
+                            if (selectableEntity.Entity is DxfLwPolyline polyline)
                             {
                                 var polygonTrajectory = CreatePolygonTrajectoryFromPolyline(polyline);
                                 currentPass.Trajectories.Add(polygonTrajectory);
@@ -3199,7 +3169,7 @@ namespace RobTeach.Views
                             }
                             else
                             {
-                                switch (hitDxfEntity) // Safe due to null check above
+                                switch (selectableEntity.Entity) // Safe due to null check above
                                 {
                                     case DxfLine line:
                                         newTrajectory.PrimitiveType = "Line";
@@ -3268,11 +3238,11 @@ namespace RobTeach.Views
                                     newTrajectory.OriginalCircleNormal = marquee_normal;
                                     break;
                                 default:
-                                    newTrajectory.PrimitiveType = hitDxfEntity.GetType().Name; // Fallback
+                                    newTrajectory.PrimitiveType = selectableEntity.Entity.GetType().Name; // Fallback
                                     break;
                                 }
                             }
-                            if (hitDxfEntity.GetType() != typeof(DxfLwPolyline))
+                            if (selectableEntity.Entity.GetType() != typeof(DxfLwPolyline))
                             {
                                 PopulateTrajectoryPoints(newTrajectory);
                                 newTrajectory.Runtime = TrajectoryUtils.CalculateMinRuntime(newTrajectory); // Set default runtime
@@ -3592,15 +3562,13 @@ namespace RobTeach.Views
                 return;
             }
 
-            var entityHandleMap = currentDoc.Entities.ToDictionary(e => e.Handle.ToString(), e => e);
-
             foreach (var pass in config.SprayPasses)
             {
                 if (pass.Trajectories == null) continue;
 
                 foreach (var trajectory in pass.Trajectories)
                 {
-                    if (!string.IsNullOrEmpty(trajectory.OriginalEntityHandle) && entityHandleMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity))
+                    if (!string.IsNullOrEmpty(trajectory.OriginalEntityHandle) && _dxfEntityGuidMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity))
                     {
                         trajectory.OriginalDxfEntity = matchedEntity;
                     }
