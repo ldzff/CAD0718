@@ -463,6 +463,7 @@ namespace RobTeach.Views
             for (int i = 0; i < currentPassTrajectories.Count; i++)
             {
                 var selectedTrajectory = currentPassTrajectories[i];
+                if (selectedTrajectory == null) continue;
                 // Debug.WriteLine($"[JULES_DEBUG] UpdateOrderNumberLabels: Checking Trajectory - Type: {selectedTrajectory.PrimitiveType}, Points Count: {(selectedTrajectory.Points?.Count ?? -1)}, Index: {i}");
 
                 if (selectedTrajectory.Points == null || !selectedTrajectory.Points.Any())
@@ -3578,7 +3579,7 @@ namespace RobTeach.Views
                 foreach (var trajectory in pass.Trajectories)
                 {
                     if (!string.IsNullOrEmpty(trajectory.OriginalEntityHandle) &&
-                        entityMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity))
+                        entityMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity) && matchedEntity != null)
                     {
                         trajectory.OriginalDxfEntity = matchedEntity;
                     }
@@ -3941,6 +3942,11 @@ namespace RobTeach.Views
                 return new Rect(insert.Location.X, insert.Location.Y, 0, 0);
             }
 
+            if (_currentDxfDocument == null)
+            {
+                AppLogger.Log($"GetDxfInsertBounds: Insert '{insert.Name}' - _currentDxfDocument is null. Cannot resolve block. Bounds based on insertion point only.", LogLevel.Warning);
+                return new Rect(insert.Location.X, insert.Location.Y, 0, 0);
+            }
             DxfBlock? block = _currentDxfDocument.Blocks.FirstOrDefault(b => b.Name == insert.Name);
             if (block == null)
             {
