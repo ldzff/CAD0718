@@ -3640,15 +3640,19 @@ namespace RobTeach.Views
                 case DxfLwPolyline poly1 when entity2 is DxfLwPolyline poly2:
                     Debug.WriteLine($"[DEBUG] LWPolylineCompare: VCount1={poly1.Vertices.Count}, VCount2={poly2.Vertices.Count}, Closed1={poly1.IsClosed}, Closed2={poly2.IsClosed}");
                     if (poly1.Vertices.Count != poly2.Vertices.Count || poly1.IsClosed != poly2.IsClosed) return false;
-                    for(int i=0; i < poly1.Vertices.Count; i++)
+
+                    var vertices1 = poly1.Vertices.OrderBy(v => v.X).ThenBy(v => v.Y).ToList();
+                    var vertices2 = poly2.Vertices.OrderBy(v => v.X).ThenBy(v => v.Y).ToList();
+
+                    for (int i = 0; i < vertices1.Count; i++)
                     {
-                        var v1 = poly1.Vertices[i];
-                        var v2 = poly2.Vertices[i];
+                        var v1 = vertices1[i];
+                        var v2 = vertices2[i];
                         // LwPolyline vertices are DxfLwPolylineVertex, which have X, Y, Bulge. Z is from polyline's Elevation.
                         // Using PointEquals for X,Y comparison by creating temporary DxfPoints.
                         bool xyMatch = PointEquals(new DxfPoint(v1.X, v1.Y, 0), new DxfPoint(v2.X, v2.Y, 0), tolerance);
                         bool bulgeMatch = Math.Abs(v1.Bulge - v2.Bulge) < tolerance;
-                        Debug.WriteLine($"[DEBUG] LWPolylineCompare: V{i} P1=({v1.X},{v1.Y},B={v1.Bulge}) | P2=({v2.X},{v2.Y},B={v2.Bulge}) | XYMatch={xyMatch}, BulgeMatch={bulgeMatch}");
+                        AppLogger.Log($"[DEBUG] LWPolylineCompare: V{i} P1=({v1.X},{v1.Y},B={v1.Bulge}) | P2=({v2.X},{v2.Y},B={v2.Bulge}) | XYMatch={xyMatch}, BulgeMatch={bulgeMatch}", LogLevel.Debug);
                         if (!xyMatch || !bulgeMatch)
                         {
                             return false;
