@@ -1703,12 +1703,9 @@ namespace RobTeach.Views
                 if (shape != null)
                 {
                     // Generate a unique identifier for the entity
-                    string entityId = Guid.NewGuid().ToString();
-                    shape.Tag = entityId;
                     shape.MouseLeftButtonDown += OnCadEntityClicked;
                     CadCanvas.Children.Add(shape);
                     _wpfShapeToDxfEntityMap[shape] = entity;
-                    _dxfEntityHandleMap[entityId] = entity;
                 }
             }
 
@@ -1956,7 +1953,7 @@ namespace RobTeach.Views
                 }
                 var currentPass = _currentConfiguration.SprayPasses[_currentConfiguration.CurrentPassIndex];
 
-                var existingTrajectory = currentPass.Trajectories.FirstOrDefault(t => t.OriginalDxfEntity == dxfEntity);
+                var existingTrajectory = currentPass.Trajectories.FirstOrDefault(t => t.OriginalEntityHandle == dxfEntity.Handle.ToString());
 
                 if (existingTrajectory != null)
                 {
@@ -1975,6 +1972,7 @@ namespace RobTeach.Views
                     var newTrajectory = new Trajectory
                     {
                         OriginalDxfEntity = dxfEntity,
+                        OriginalEntityHandle = dxfEntity.Handle.ToString(),
                         EntityType = dxfEntity.GetType().Name, // General type, can be overridden by PrimitiveType
                         IsReversed = false // Default, can be changed by specific logic below or UI
                     };
@@ -3179,13 +3177,13 @@ namespace RobTeach.Views
                         if (hitDxfEntity == null) continue; // Skip null entities
 
                         // Use geometric comparison to check if already selected, due to potential instance differences
-                        bool alreadySelected = currentPass.Trajectories.Any(t => t.OriginalDxfEntity != null && AreEntitiesGeometricallyEquivalent(t.OriginalDxfEntity, hitDxfEntity));
+                        bool alreadySelected = currentPass.Trajectories.Any(t => t.OriginalEntityHandle == hitDxfEntity.Handle.ToString());
                         if (!alreadySelected)
                         {
-                            Debug.WriteLine($"[DEBUG] CadCanvas_MouseUp (Normal Marquee - Additive): Adding {hitDxfEntity.GetType().Name} as it's not geometrically equivalent to any existing selected trajectory's entity.");
                             var newTrajectory = new Trajectory
                             {
                                 OriginalDxfEntity = hitDxfEntity,
+                                OriginalEntityHandle = hitDxfEntity.Handle.ToString(),
                                 EntityType = hitDxfEntity.GetType().Name, // Safe due to null check above
                                 IsReversed = false // Default
                             };
@@ -3584,93 +3582,6 @@ namespace RobTeach.Views
                    Math.Abs(p1.Z - p2.Z) < tolerance;
         }
 
-        private bool AreEntitiesGeometricallyEquivalent(DxfEntity entity1, DxfEntity entity2, double tolerance = 0.001)
-        {
-            if (entity1 == null || entity2 == null)
-            {
-                Debug.WriteLineIf(entity1 == null || entity2 == null, $"[DEBUG] AreEntitiesGeometricallyEquivalent: One or both entities are null. Entity1: {(entity1 == null ? "null" : entity1.GetType().Name)}, Entity2: {(entity2 == null ? "null" : entity2.GetType().Name)}");
-                return false;
-            }
-            if (entity1.GetType() != entity2.GetType())
-            {
-                Debug.WriteLine($"[DEBUG] AreEntitiesGeometricallyEquivalent: Entity types differ: {entity1.GetType().Name} vs {entity2.GetType().Name}");
-                return false;
-            }
-
-            Debug.WriteLine($"[DEBUG] AreEntitiesGeometricallyEquivalent: Comparing two {entity1.GetType().Name}");
-
-            switch (entity1)
-            {
-                case DxfLine line1 when entity2 is DxfLine line2:
-                    bool p1p1 = PointEquals(line1.P1, line2.P1, tolerance);
-                    bool p2p2 = PointEquals(line1.P2, line2.P2, tolerance);
-                    bool p1p2 = PointEquals(line1.P1, line2.P2, tolerance);
-                    bool p2p1 = PointEquals(line1.P2, line2.P1, tolerance);
-                    Debug.WriteLine($"[DEBUG] LineCompare: L1P1={line1.P1}, L1P2={line1.P2} | L2P1={line2.P1}, L2P2={line2.P2}");
-                    Debug.WriteLine($"[DEBUG] LineCompare: (P1s match: {p1p1}, P2s match: {p2p2}) OR (P1-L2P2 match: {p1p2}, P2-L2P1 match: {p2p1})");
-                    return (p1p1 && p2p2) || (p1p2 && p2p1);
-
-                case DxfCircle circle1 when entity2 is DxfCircle circle2:
-                    bool centerMatch = PointEquals(circle1.Center, circle2.Center, tolerance);
-                    bool radiusMatch = Math.Abs(circle1.Radius - circle2.Radius) < tolerance;
-                    Debug.WriteLine($"[DEBUG] CircleCompare: C1=({circle1.Center}, R={circle1.Radius}) | C2=({circle2.Center}, R={circle2.Radius})");
-                    Debug.WriteLine($"[DEBUG] CircleCompare: CenterMatch={centerMatch}, RadiusMatch={radiusMatch}");
-                    return centerMatch && radiusMatch;
-
-                case DxfArc arc1 when entity2 is DxfArc arc2:
-                    // TODO: Robust angle comparison (normalize to 0-360, handle wrap-around)
-                    // For now, using modulo which is not perfectly robust for all cases like 0 vs 360.
-                    // A better way: convert angles to vectors or check if one angle is equivalent to other + k*360.
-                    double normalizedStartAngle1 = (arc1.StartAngle % 360 + 360) % 360;
-                    double normalizedEndAngle1 = (arc1.EndAngle % 360 + 360) % 360;
-                    double normalizedStartAngle2 = (arc2.StartAngle % 360 + 360) % 360;
-                    double normalizedEndAngle2 = (arc2.EndAngle % 360 + 360) % 360;
-
-                    bool arcCenterMatch = PointEquals(arc1.Center, arc2.Center, tolerance);
-                    bool arcRadiusMatch = Math.Abs(arc1.Radius - arc2.Radius) < tolerance;
-                    bool arcStartAngleMatch = Math.Abs(normalizedStartAngle1 - normalizedStartAngle2) < tolerance || Math.Abs(normalizedStartAngle1 - normalizedStartAngle2 - 360) < tolerance || Math.Abs(normalizedStartAngle1 - normalizedStartAngle2 + 360) < tolerance;
-                    bool arcEndAngleMatch = Math.Abs(normalizedEndAngle1 - normalizedEndAngle2) < tolerance || Math.Abs(normalizedEndAngle1 - normalizedEndAngle2 - 360) < tolerance || Math.Abs(normalizedEndAngle1 - normalizedEndAngle2 + 360) < tolerance;
-
-                    Debug.WriteLine($"[DEBUG] ArcCompare: A1=C({arc1.Center}),R({arc1.Radius}),SA({arc1.StartAngle}),EA({arc1.EndAngle})");
-                    Debug.WriteLine($"[DEBUG] ArcCompare: A2=C({arc2.Center}),R({arc2.Radius}),SA({arc2.StartAngle}),EA({arc2.EndAngle})");
-                    Debug.WriteLine($"[DEBUG] ArcCompare: NormA1=SA({normalizedStartAngle1}),EA({normalizedEndAngle1}) | NormA2=SA({normalizedStartAngle2}),EA({normalizedEndAngle2})");
-                    Debug.WriteLine($"[DEBUG] ArcCompare: CenterMatch={arcCenterMatch}, RadiusMatch={arcRadiusMatch}, StartAngleMatch={arcStartAngleMatch}, EndAngleMatch={arcEndAngleMatch}");
-                    return arcCenterMatch && arcRadiusMatch && arcStartAngleMatch && arcEndAngleMatch;
-
-                case DxfLwPolyline poly1 when entity2 is DxfLwPolyline poly2:
-                    AppLogger.Log($"[DEBUG] LWPolylineCompare: VCount1={poly1.Vertices.Count}, VCount2={poly2.Vertices.Count}, Closed1={poly1.IsClosed}, Closed2={poly2.IsClosed}", LogLevel.Debug);
-                    if (poly1.Vertices.Count != poly2.Vertices.Count || poly1.IsClosed != poly2.IsClosed) return false;
-
-                    var vertices1 = poly1.Vertices.Select(v => new Point(v.X, v.Y)).ToList();
-                    var vertices2 = poly2.Vertices.Select(v => new Point(v.X, v.Y)).ToList();
-
-                    int startIndex1 = FindBottomLeftVertexIndex(vertices1);
-                    int startIndex2 = FindBottomLeftVertexIndex(vertices2);
-
-                    AppLogger.Log($"[DEBUG] LWPolylineCompare: StartIndex1={startIndex1}, StartIndex2={startIndex2}", LogLevel.Debug);
-
-                    if (startIndex1 == -1 || startIndex2 == -1) return false;
-
-                    for (int i = 0; i < vertices1.Count; i++)
-                    {
-                        var v1 = poly1.Vertices[(startIndex1 + i) % vertices1.Count];
-                        var v2 = poly2.Vertices[(startIndex2 + i) % vertices2.Count];
-
-                        bool xyMatch = PointEquals(new DxfPoint(v1.X, v1.Y, 0), new DxfPoint(v2.X, v2.Y, 0), tolerance);
-                        bool bulgeMatch = Math.Abs(v1.Bulge - v2.Bulge) < tolerance;
-                        AppLogger.Log($"[DEBUG] LWPolylineCompare: V{i} P1=({v1.X},{v1.Y},B={v1.Bulge}) | P2=({v2.X},{v2.Y},B={v2.Bulge}) | XYMatch={xyMatch}, BulgeMatch={bulgeMatch}", LogLevel.Debug);
-                        if (!xyMatch || !bulgeMatch)
-                        {
-                            return false;
-                        }
-                    }
-                    return true;
-                // TODO: Add other entity types as needed
-                default:
-                    Debug.WriteLine($"[WARNING] AreEntitiesGeometricallyEquivalent: Unhandled entity type {entity1.GetType().Name} for comparison.");
-                    return false;
-            }
-        }
 
         private void ReconcileTrajectoryEntities(Models.Configuration config, DxfFile? currentDoc)
         {
@@ -3681,63 +3592,17 @@ namespace RobTeach.Views
                 return;
             }
 
-            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Document has {currentDoc.Entities.Count()} entities.", LogLevel.Debug);
-            List<DxfEntity> availableDocEntities = new List<DxfEntity>(currentDoc.Entities);
+            var entityHandleMap = currentDoc.Entities.ToDictionary(e => e.Handle.ToString(), e => e);
 
             foreach (var pass in config.SprayPasses)
             {
-                AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Processing pass '{pass.PassName}'.", LogLevel.Debug);
-                if (pass.Trajectories == null)
+                if (pass.Trajectories == null) continue;
+
+                foreach (var trajectory in pass.Trajectories)
                 {
-                    AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Pass '{pass.PassName}' has null trajectories. Skipping.", LogLevel.Debug);
-                    continue;
-                }
-
-                for (int i = 0; i < pass.Trajectories.Count; i++)
-                {
-                    var trajectory = pass.Trajectories[i];
-                    AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Processing trajectory {i} in pass '{pass.PassName}'. PrimitiveType: {trajectory.PrimitiveType}", LogLevel.Debug);
-
-                    if (trajectory.PrimitiveType == "Polygon" && trajectory.SerializableVertices.Any())
+                    if (!string.IsNullOrEmpty(trajectory.OriginalEntityHandle) && entityHandleMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity))
                     {
-                        DxfLwPolyline? matchedEntity = availableDocEntities.OfType<DxfLwPolyline>().FirstOrDefault(poly => {
-                            if (poly.Vertices.Count != trajectory.SerializableVertices.Count) return false;
-                            var polyVertices = poly.Vertices.Select(v => new Point3D(v.X, v.Y, poly.Elevation)).ToList();
-                            var trajVertices = trajectory.SerializableVertices;
-
-                            var polyPoints = polyVertices.Select(p => new Point(p.X, p.Y)).ToList();
-                            var trajPoints = trajVertices.Select(p => new Point(p.X, p.Y)).ToList();
-
-                            int startIndex1 = FindBottomLeftVertexIndex(polyPoints);
-                            int startIndex2 = FindBottomLeftVertexIndex(trajPoints);
-
-                            if (startIndex1 == -1 || startIndex2 == -1) return false;
-
-                            for(int j = 0; j < polyPoints.Count; j++)
-                            {
-                                var p1 = polyVertices[(startIndex1 + j) % polyPoints.Count];
-                                var p2 = trajVertices[(startIndex2 + j) % trajPoints.Count];
-                                if (Math.Abs(p1.X - p2.X) > 0.001 || Math.Abs(p1.Y - p2.Y) > 0.001)
-                                {
-                                    return false;
-                                }
-                            }
-                            return true;
-                        });
-
-                        if (matchedEntity != null)
-                        {
-                            trajectory.OriginalDxfEntity = matchedEntity;
-                            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Reconciled polygon trajectory.", LogLevel.Debug);
-                        }
-                        else
-                        {
-                            AppLogger.Log($"[WARNING] ReconcileTrajectoryEntities: Could not find a matching live entity for deserialized polygon.", LogLevel.Warning);
-                        }
-                    }
-                    else
-                    {
-                         // Handle other entity types if necessary
+                        trajectory.OriginalDxfEntity = matchedEntity;
                     }
                 }
             }
