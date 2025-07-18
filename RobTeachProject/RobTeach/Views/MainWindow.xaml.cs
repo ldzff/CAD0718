@@ -64,6 +64,7 @@ namespace RobTeach.Views
         private readonly List<DxfEntity> _selectedDxfEntities = new List<DxfEntity>(); // Stores original DXF entities selected by the user.
         // Qualified System.Windows.Shapes.Shape for dictionary key
         private readonly Dictionary<System.Windows.Shapes.Shape, SelectableDxfEntity> _wpfShapeToDxfEntityMap = new Dictionary<System.Windows.Shapes.Shape, SelectableDxfEntity>();
+        private readonly Dictionary<string, DxfEntity> _dxfEntityHandleMap = new Dictionary<string, DxfEntity>();
         private readonly Dictionary<string, SelectableDxfEntity> _dxfEntityGuidMap = new Dictionary<string, SelectableDxfEntity>();
         private readonly List<System.Windows.Shapes.Polyline> _trajectoryPreviewPolylines = new List<System.Windows.Shapes.Polyline>(); // Keeps track of trajectory preview polylines for easy removal.
         private List<DirectionIndicator> _directionIndicators; // Field for the direction indicator arrow
@@ -1708,6 +1709,7 @@ namespace RobTeach.Views
                     shape.MouseLeftButtonDown += OnCadEntityClicked;
                     CadCanvas.Children.Add(shape);
                     _wpfShapeToDxfEntityMap[shape] = selectableEntity;
+                    _dxfEntityHandleMap[selectableEntity.Id.ToString()] = entity;
                     _dxfEntityGuidMap[selectableEntity.Id.ToString()] = selectableEntity;
                 }
             }
@@ -1735,6 +1737,7 @@ namespace RobTeach.Views
                     // Reset all selections and configurations
                     _selectedDxfEntities.Clear();
                     _wpfShapeToDxfEntityMap.Clear();
+                    _dxfEntityHandleMap.Clear();
                     _dxfEntityHandleMap.Clear();
                     _trajectoryPreviewPolylines.Clear();
                     _currentConfiguration = new Models.Configuration();
@@ -1932,6 +1935,14 @@ namespace RobTeach.Views
                 var currentPass = _currentConfiguration.SprayPasses[_currentConfiguration.CurrentPassIndex];
 
                 var existingTrajectory = currentPass.Trajectories.FirstOrDefault(t => t.OriginalEntityHandle == entityId);
+
+                if (!_dxfEntityHandleMap.TryGetValue(entityId, out var dxfEntityFromMap))
+                {
+                    // This should not happen if the maps are consistent.
+                    // Handle error or log a warning.
+                    AppLogger.Log($"[ERROR] OnCadEntityClicked: DxfEntity not found in _dxfEntityHandleMap for ID: {entityId}", LogLevel.Error);
+                    return;
+                }
 
                 if (existingTrajectory != null)
                 {
@@ -3562,13 +3573,18 @@ namespace RobTeach.Views
                 return;
             }
 
+            // Create a map of entity handles to DxfEntity objects from the current document
+            var entityMap = currentDoc.Entities.ToDictionary(e => e.Handle.ToString("X"), e => e);
+
             foreach (var pass in config.SprayPasses)
             {
                 if (pass.Trajectories == null) continue;
 
                 foreach (var trajectory in pass.Trajectories)
                 {
-                    if (!string.IsNullOrEmpty(trajectory.OriginalEntityHandle) && _dxfEntityGuidMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity))
+                    // Use the handle from the trajectory to find the matching entity in the current document
+                    if (!string.IsNullOrEmpty(trajectory.OriginalEntityHandle) &&
+                        _dxfEntityHandleMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity))
                     {
                         trajectory.OriginalDxfEntity = matchedEntity;
                     }
