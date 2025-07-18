@@ -64,7 +64,7 @@ namespace RobTeach.Views
         private readonly List<DxfEntity> _selectedDxfEntities = new List<DxfEntity>(); // Stores original DXF entities selected by the user.
         // Qualified System.Windows.Shapes.Shape for dictionary key
         private readonly Dictionary<System.Windows.Shapes.Shape, SelectableDxfEntity> _wpfShapeToDxfEntityMap = new Dictionary<System.Windows.Shapes.Shape, SelectableDxfEntity>();
-        private readonly Dictionary<string, DxfEntity> _dxfEntityHandleMap = new Dictionary<string, DxfEntity>();
+        private readonly Dictionary<string, SelectableDxfEntity> _dxfEntityHandleMap = new Dictionary<string, SelectableDxfEntity>();
         private readonly Dictionary<string, SelectableDxfEntity> _dxfEntityGuidMap = new Dictionary<string, SelectableDxfEntity>();
         private readonly List<System.Windows.Shapes.Polyline> _trajectoryPreviewPolylines = new List<System.Windows.Shapes.Polyline>(); // Keeps track of trajectory preview polylines for easy removal.
         private List<DirectionIndicator> _directionIndicators; // Field for the direction indicator arrow
@@ -1710,7 +1710,7 @@ namespace RobTeach.Views
                     shape.MouseLeftButtonDown += OnCadEntityClicked;
                     CadCanvas.Children.Add(shape);
                     _wpfShapeToDxfEntityMap[shape] = selectableEntity;
-                    _dxfEntityHandleMap[selectableEntity.Id.ToString()] = entity;
+                    _dxfEntityHandleMap[selectableEntity.Id.ToString()] = selectableEntity;
                     _dxfEntityGuidMap[selectableEntity.Id.ToString()] = selectableEntity;
                 }
             }
@@ -1947,13 +1947,13 @@ namespace RobTeach.Views
                 {
                     var newTrajectory = new Trajectory
                     {
-                        OriginalDxfEntity = selectableEntity.Entity,
+                        OriginalDxfEntity = dxfEntity,
                         OriginalEntityHandle = entityId,
-                        EntityType = selectableEntity.Entity.GetType().Name,
+                        EntityType = dxfEntity.GetType().Name,
                         IsReversed = false
                     };
 
-                    switch (selectableEntity.Entity)
+                    switch (dxfEntity)
                     {
                         case DxfLwPolyline polyline:
                             trajectoryToSelect = CreatePolygonTrajectoryFromPolyline(polyline);
@@ -2314,6 +2314,7 @@ namespace RobTeach.Views
                                             wpfShape.MouseLeftButtonDown += OnCadEntityClicked;
                                             var selectableEntity = new SelectableDxfEntity(entity);
                                             _wpfShapeToDxfEntityMap[wpfShape] = selectableEntity;
+                                            _dxfEntityHandleMap[selectableEntity.Id.ToString()] = selectableEntity;
                                             _dxfEntityGuidMap[selectableEntity.Id.ToString()] = selectableEntity;
                                             CadCanvas.Children.Add(wpfShape);
                                         }
@@ -3570,8 +3571,6 @@ namespace RobTeach.Views
                 return;
             }
 
-            var entityMap = currentDoc.Entities.ToDictionary(e => e.Handle.ToString("X"), e => e);
-
             foreach (var pass in config.SprayPasses)
             {
                 if (pass.Trajectories == null) continue;
@@ -3579,9 +3578,9 @@ namespace RobTeach.Views
                 foreach (var trajectory in pass.Trajectories)
                 {
                     if (!string.IsNullOrEmpty(trajectory.OriginalEntityHandle) &&
-                        entityMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedEntity) && matchedEntity != null)
+                        _dxfEntityHandleMap.TryGetValue(trajectory.OriginalEntityHandle, out var matchedSelectableEntity) && matchedSelectableEntity != null)
                     {
-                        trajectory.OriginalDxfEntity = matchedEntity;
+                        trajectory.OriginalDxfEntity = matchedSelectableEntity.Entity;
                     }
                 }
             }
