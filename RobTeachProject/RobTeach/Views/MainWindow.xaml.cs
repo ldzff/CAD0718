@@ -3652,9 +3652,9 @@ namespace RobTeach.Views
                         // Using PointEquals for X,Y comparison by creating temporary DxfPoints.
                         bool xyMatch = PointEquals(new DxfPoint(v1.X, v1.Y, 0), new DxfPoint(v2.X, v2.Y, 0), tolerance);
                         bool bulgeMatch = Math.Abs(v1.Bulge - v2.Bulge) < tolerance;
+                        AppLogger.Log($"[DEBUG] LWPolylineCompare: V{i} P1=({v1.X},{v1.Y},B={v1.Bulge}) | P2=({v2.X},{v2.Y},B={v2.Bulge}) | XYMatch={xyMatch}, BulgeMatch={bulgeMatch}", LogLevel.Debug);
                         if (!xyMatch || !bulgeMatch)
                         {
-                            AppLogger.Log($"[DEBUG] LWPolylineCompare: Mismatch found at index {i}. V1=({v1.X},{v1.Y},B={v1.Bulge}), V2=({v2.X},{v2.Y},B={v2.Bulge})", LogLevel.Debug);
                             return false;
                         }
                     }
@@ -3692,7 +3692,7 @@ namespace RobTeach.Views
                     if (trajectory.PrimitiveType == "Polygon")
                     {
                         PopulateTrajectoryPoints(trajectory);
-                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Populated points for polygon trajectory. Point count: {trajectory.Points.Count}", LogLevel.Debug);
+                        AppLogger.Log($"[DEBUG] Pre-Reconciliation: Populated points for Polygon Trajectory. Point Count: {trajectory.Points.Count}", LogLevel.Debug);
                     }
                 }
 
@@ -3700,9 +3700,9 @@ namespace RobTeach.Views
                 {
                     var trajectory = pass.Trajectories[i];
                     AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Processing trajectory {i} in pass '{pass.PassName}'. PrimitiveType: {trajectory.PrimitiveType}", LogLevel.Debug);
-                    if (trajectory.OriginalDxfEntity == null && trajectory.PrimitiveType != "Polygon")
+                    if (trajectory.OriginalDxfEntity == null)
                     {
-                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Trajectory {i} has null OriginalDxfEntity and is not a Polygon. Skipping.", LogLevel.Debug);
+                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Trajectory {i} has null OriginalDxfEntity. Skipping.", LogLevel.Debug);
                         continue;
                     }
 
@@ -3711,9 +3711,9 @@ namespace RobTeach.Views
 
                     for (int j = 0; j < availableDocEntities.Count; j++)
                     {
-                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Comparing trajectory {i} ('{trajectory.PrimitiveType}') with entity {j} ('{availableDocEntities[j].GetType().Name}')", LogLevel.Debug);
                         if (trajectory.OriginalDxfEntity is DxfLwPolyline poly1 && availableDocEntities[j] is DxfLwPolyline poly2)
                         {
+                            AppLogger.Log($"[DEBUG] Comparing Polygons: Trajectory {i} with Entity {j}", LogLevel.Debug);
                             AppLogger.Log($"[DEBUG] Poly1 Vertices: {string.Join(", ", poly1.Vertices.Select(v => $"({v.X},{v.Y})"))}", LogLevel.Debug);
                             AppLogger.Log($"[DEBUG] Poly2 Vertices: {string.Join(", ", poly2.Vertices.Select(v => $"({v.X},{v.Y})"))}", LogLevel.Debug);
                         }
