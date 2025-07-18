@@ -3711,12 +3711,27 @@ namespace RobTeach.Views
                             {
                                 // A simple comparison for polygons could be to check if they have the same number of vertices
                                 // and if the first vertex is the same. This is not a robust check, but it's a start.
-                                if (polyline.Vertices.Count == trajectory.Points.Count &&
-                                    PointEquals(new DxfPoint(polyline.Vertices[0].X, polyline.Vertices[0].Y, polyline.Elevation), new DxfPoint(trajectory.Points[0].X, trajectory.Points[0].Y, trajectory.PolygonZ)))
+                                if (polyline.Vertices.Count == trajectory.Points.Count)
                                 {
-                                    matchedEntity = availableDocEntities[j];
-                                    matchedEntityIndexInAvailableList = j;
-                                    break;
+                                    bool allVerticesMatch = true;
+                                    for (int k = 0; k < polyline.Vertices.Count; k++)
+                                    {
+                                        var v1 = polyline.Vertices[k];
+                                        var v2 = trajectory.Points[k];
+                                        if (!PointEquals(new DxfPoint(v1.X, v1.Y, polyline.Elevation), new DxfPoint(v2.X, v2.Y, trajectory.PolygonZ)))
+                                        {
+                                            allVerticesMatch = false;
+                                            break;
+                                        }
+                                    }
+
+                                    if (allVerticesMatch)
+                                    {
+                                        matchedEntity = availableDocEntities[j];
+                                        matchedEntityIndexInAvailableList = j;
+                                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Matched polygon trajectory with {polyline.Vertices.Count} vertices.", LogLevel.Debug);
+                                        break;
+                                    }
                                 }
                             }
                         }
