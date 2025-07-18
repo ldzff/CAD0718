@@ -3652,10 +3652,9 @@ namespace RobTeach.Views
                         // Using PointEquals for X,Y comparison by creating temporary DxfPoints.
                         bool xyMatch = PointEquals(new DxfPoint(v1.X, v1.Y, 0), new DxfPoint(v2.X, v2.Y, 0), tolerance);
                         bool bulgeMatch = Math.Abs(v1.Bulge - v2.Bulge) < tolerance;
-                        AppLogger.Log($"[DEBUG] LWPolylineCompare: V{i} P1=({v1.X},{v1.Y},B={v1.Bulge}) | P2=({v2.X},{v2.Y},B={v2.Bulge}) | XYMatch={xyMatch}, BulgeMatch={bulgeMatch}", LogLevel.Debug);
                         if (!xyMatch || !bulgeMatch)
                         {
-                            AppLogger.Log($"[DEBUG] LWPolylineCompare: Mismatch found at index {i}", LogLevel.Debug);
+                            AppLogger.Log($"[DEBUG] LWPolylineCompare: Mismatch found at index {i}. V1=({v1.X},{v1.Y},B={v1.Bulge}), V2=({v2.X},{v2.Y},B={v2.Bulge})", LogLevel.Debug);
                             return false;
                         }
                     }
@@ -3688,6 +3687,15 @@ namespace RobTeach.Views
                     continue;
                 }
 
+                foreach (var trajectory in pass.Trajectories)
+                {
+                    if (trajectory.PrimitiveType == "Polygon")
+                    {
+                        PopulateTrajectoryPoints(trajectory);
+                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Populated points for polygon trajectory. Point count: {trajectory.Points.Count}", LogLevel.Debug);
+                    }
+                }
+
                 for (int i = 0; i < pass.Trajectories.Count; i++)
                 {
                     var trajectory = pass.Trajectories[i];
@@ -3698,38 +3706,34 @@ namespace RobTeach.Views
                         continue;
                     }
 
-                    if (trajectory.PrimitiveType == "Polygon")
+                    DxfEntity? matchedEntity = null;
+                    int matchedEntityIndexInAvailableList = -1;
+
+                    for (int j = 0; j < availableDocEntities.Count; j++)
                     {
-                        var vertices = trajectory.Points.Select(p => new DxfLwPolylineVertex { X = p.X, Y = p.Y }).ToList();
-                        var polyline = new DxfLwPolyline(vertices) { IsClosed = true, Elevation = trajectory.PolygonZ };
-                        trajectory.OriginalDxfEntity = polyline;
-                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Re-created polygon trajectory with {vertices.Count} vertices.", LogLevel.Debug);
+                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Comparing trajectory {i} ('{trajectory.PrimitiveType}') with entity {j} ('{availableDocEntities[j].GetType().Name}')", LogLevel.Debug);
+                        if (trajectory.OriginalDxfEntity is DxfLwPolyline poly1 && availableDocEntities[j] is DxfLwPolyline poly2)
+                        {
+                            AppLogger.Log($"[DEBUG] Poly1 Vertices: {string.Join(", ", poly1.Vertices.Select(v => $"({v.X},{v.Y})"))}", LogLevel.Debug);
+                            AppLogger.Log($"[DEBUG] Poly2 Vertices: {string.Join(", ", poly2.Vertices.Select(v => $"({v.X},{v.Y})"))}", LogLevel.Debug);
+                        }
+
+                        if (AreEntitiesGeometricallyEquivalent(trajectory.OriginalDxfEntity, availableDocEntities[j]))
+                        {
+                            matchedEntity = availableDocEntities[j];
+                            matchedEntityIndexInAvailableList = j;
+                            break;
+                        }
+                    }
+
+                    if (matchedEntity != null)
+                    {
+                        trajectory.OriginalDxfEntity = matchedEntity;
+                        AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Reconciled trajectory entity: {matchedEntity.GetType().Name}", LogLevel.Debug);
                     }
                     else
                     {
-                        DxfEntity? matchedEntity = null;
-                        int matchedEntityIndexInAvailableList = -1;
-
-                        for (int j = 0; j < availableDocEntities.Count; j++)
-                        {
-                            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Comparing trajectory {i} with entity {j} of type {availableDocEntities[j].GetType().Name}", LogLevel.Debug);
-                            if (AreEntitiesGeometricallyEquivalent(trajectory.OriginalDxfEntity, availableDocEntities[j]))
-                            {
-                                matchedEntity = availableDocEntities[j];
-                                matchedEntityIndexInAvailableList = j;
-                                break;
-                            }
-                        }
-
-                        if (matchedEntity != null)
-                        {
-                            trajectory.OriginalDxfEntity = matchedEntity;
-                            AppLogger.Log($"[DEBUG] ReconcileTrajectoryEntities: Reconciled trajectory entity: {matchedEntity.GetType().Name}", LogLevel.Debug);
-                        }
-                        else
-                        {
-                            AppLogger.Log($"[WARNING] ReconcileTrajectoryEntities: Could not find a matching live entity for deserialized {trajectory.PrimitiveType}.", LogLevel.Warning);
-                        }
+                        AppLogger.Log($"[WARNING] ReconcileTrajectoryEntities: Could not find a matching live entity for deserialized {trajectory.PrimitiveType}.", LogLevel.Warning);
                     }
                 }
             }
